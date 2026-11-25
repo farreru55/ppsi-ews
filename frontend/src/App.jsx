@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { api, clearTokens } from './api';
 import {
   ShieldCheck,
   TrendingUp,
@@ -405,57 +406,128 @@ export default function App() {
   // ============================================================================
   // HANDLERS: AUTENTIKASI (PR-01)
   // ============================================================================
-  const handleLogin = (e, quickRole = null) => {
-    if (e) e.preventDefault();
-    const identifier = (quickRole || loginInput).trim().toLowerCase();
+  const mapBackendUser = (user) => {
+    const roles = user?.roles || [];
+    const name = user?.nama || user?.username || 'Pengguna';
+    const initials = name
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((s) => s[0].toUpperCase())
+      .join('') || 'EW';
 
-    if (!identifier) {
+    if (roles.includes('ADMIN')) {
+      return {
+        role: 'ADMIN',
+        roleLabel: 'Administrator & Pimpinan',
+        name,
+        subtitle: 'Administrator Sistem',
+        initials,
+        raw: user,
+      };
+    }
+    if (roles.includes('KAPRODI') || roles.includes('KOORD_TA')) {
+      return {
+        role: 'KAPRODI',
+        roleLabel: 'Kaprodi & Koordinator TA',
+        name,
+        subtitle: roles.includes('KAPRODI') ? 'Kaprodi • S1 SI' : 'Koordinator TA',
+        initials,
+        raw: user,
+      };
+    }
+    if (roles.includes('DOSEN_WALI') || roles.includes('DOSBING_TA')) {
+      return {
+        role: 'DOSEN',
+        roleLabel: 'Dosen Wali & Dosbing',
+        name,
+        subtitle: 'DPA & Dosbing TA',
+        initials,
+        raw: user,
+      };
+    }
+    return {
+      role: 'MAHASISWA',
+      roleLabel: 'Mahasiswa',
+      name,
+      subtitle: `Mahasiswa • ${user?.nim || user?.username || ''}`,
+      initials,
+      raw: user,
+    };
+  };
+
+  useEffect(() => {
+    if (!currentUser?.raw) return;
+    const loadRoleData = async () => {
+      try {
+        if (currentUser.role === 'MAHASISWA') {
+          const risk = await api.getMyRisk();
+          if (risk) {
+            setStudentData((prev) => ({
+              ...prev,
+              nim: risk.nim || prev.nim,
+              nama: risk.nama || currentUser.name || prev.nama,
+              skorTotal: risk.skor_total ?? risk.skorTotal ?? prev.skorTotal,
+              status: risk.status_risiko || risk.status || prev.status,
+            }));
+          }
+        } else if (currentUser.role === 'DOSEN') {
+          const adviseesData = await api.getAdvisees();
+          if (Array.isArray(adviseesData) && adviseesData.length > 0) {
+            setAdvisees(
+              adviseesData.map((a) => ({
+                nim: a.nim,
+                nama: a.nama,
+                prodi: a.nama_prodi || 'S1 Sistem Informasi',
+                angkatan: a.angkatan || 2022,
+                semester: a.semester || 8,
+                skor: a.skor_total ?? a.skor ?? 0,
+                status: a.status_risiko || a.status || 'HIJAU',
+                taProgress: a.ta_progress || 'Terpantau',
+                lastContact: a.last_contact || 'Baru saja',
+              }))
+            );
+          }
+        }
+      } catch (err) {
+        console.warn('Gagal memuat data dari backend, menggunakan data simulasi:', err.message);
+      }
+    };
+    loadRoleData();
+  }, [currentUser]);
+
+  const handleLogin = async (e, quickRole = null) => {
+    if (e) e.preventDefault();
+    const quickMap = {
+      mahasiswa: '24410100007',
+      dosen: 'doswal.bagus',
+      kaprodi: 'kaprodi.si',
+      admin: 'admin',
+    };
+    const username = quickRole ? quickMap[quickRole] || quickRole : loginInput.trim();
+    const password = quickRole ? 'password123' : passwordInput || 'password123';
+
+    if (!username) {
       setLoginError('Masukkan Username / NIM atau pilih akun demo di bawah.');
       return;
     }
 
     setLoginError('');
-    if (identifier.includes('dosen') || identifier.includes('doswal') || identifier === '0712048801') {
-      setCurrentUser({
-        role: 'DOSEN',
-        roleLabel: 'Dosen Wali & Dosbing',
-        name: 'Dr. Sinta Maharani',
-        subtitle: 'DPA & Dosbing TA • SI 13',
-        initials: 'DS'
-      });
-      setActiveNav('matriks');
-    } else if (identifier.includes('kaprodi') || identifier.includes('koord')) {
-      setCurrentUser({
-        role: 'KAPRODI',
-        roleLabel: 'Kaprodi & Koordinator TA',
-        name: 'Dr. Budi Santoso',
-        subtitle: 'Kaprodi • S1 SI',
-        initials: 'DB'
-      });
-      setActiveNav('health');
-    } else if (identifier.includes('admin') || identifier.includes('it')) {
-      setCurrentUser({
-        role: 'ADMIN',
-        roleLabel: 'Administrator & Pimpinan',
-        name: 'Rizky Pratama',
-        subtitle: 'Administrator Sistem',
-        initials: 'RP'
-      });
-      setActiveNav('config');
-    } else {
-      // Default ke Mahasiswa (Raka Aditya - 22410100042)
-      setCurrentUser({
-        role: 'MAHASISWA',
-        roleLabel: 'Mahasiswa',
-        name: 'Raka Aditya',
-        subtitle: 'Mahasiswa • SI 2022',
-        initials: 'RA'
-      });
-      setActiveNav('status');
+    try {
+      const data = await api.login(username, password);
+      const mapped = mapBackendUser(data.user);
+      setCurrentUser(mapped);
+      if (mapped.role === 'DOSEN') setActiveNav('matriks');
+      else if (mapped.role === 'KAPRODI') setActiveNav('health');
+      else if (mapped.role === 'ADMIN') setActiveNav('config');
+      else setActiveNav('status');
+    } catch (err) {
+      setLoginError(err.message || 'Login gagal. Pastikan server backend berjalan.');
     }
   };
 
   const handleLogout = () => {
+    clearTokens();
     setCurrentUser(null);
     setLoginInput('');
     setPasswordInput('');
@@ -466,7 +538,9 @@ export default function App() {
   // ============================================================================
   // HANDLERS: MAHASISWA ACTION PLAN (FR-DSH-05)
   // ============================================================================
-  const toggleActionPlan = (planId) => {
+  const toggleActionPlan = async (planId) => {
+    const targetPlan = studentData.actionPlans.find((p) => p.id === planId);
+    const nextSelesai = targetPlan ? !targetPlan.selesai : true;
     setStudentData((prev) => {
       const updatedPlans = prev.actionPlans.map((plan) =>
         plan.id === planId ? { ...plan, selesai: !plan.selesai } : plan
@@ -482,6 +556,13 @@ export default function App() {
         status: newStatus
       };
     });
+    if (currentUser?.raw && typeof planId === 'number') {
+      try {
+        await api.updateActionPlan(planId, nextSelesai ? 'SELESAI' : 'BELUM');
+      } catch (err) {
+        console.warn('Gagal update action plan ke backend:', err.message);
+      }
+    }
     showToastMessage('Status Action Plan berhasil diperbarui.');
   };
 
@@ -500,11 +581,24 @@ export default function App() {
       .sort((a, b) => (sortOrder === 'DESC' ? b.skor - a.skor : a.skor - b.skor));
   }, [advisees, searchQuery, statusFilter, sortOrder]);
 
-  const handleSaveCounseling = (e) => {
+  const handleSaveCounseling = async (e) => {
     e.preventDefault();
     if (!counselingForm.kendala.trim() || !counselingForm.rekomendasi.trim()) {
       showToastMessage('Catatan kendala dan rekomendasi wajib diisi.', 'error');
       return;
+    }
+
+    if (currentUser?.raw) {
+      try {
+        await api.createCounseling(counselingStudent.nim, {
+          tgl_konseling: counselingForm.tanggal,
+          catatan: counselingForm.kendala,
+          tindak_lanjut: counselingForm.rekomendasi,
+        });
+      } catch (err) {
+        showToastMessage(err.message || 'Gagal menyimpan catatan konseling ke backend.', 'error');
+        return;
+      }
     }
 
     const newLog = {
@@ -531,9 +625,21 @@ export default function App() {
   // ============================================================================
   // HANDLERS: KAPRODI ESKALASI & EKSPOR (FR-DSH-07)
   // ============================================================================
-  const handleConfirmEscalation = (e) => {
+  const handleConfirmEscalation = async (e) => {
     e.preventDefault();
     if (!escalationModalItem) return;
+
+    if (currentUser?.raw && typeof escalationModalItem.id === 'number') {
+      try {
+        await api.updateEscalation(escalationModalItem.id, {
+          status_respons: 'DIRESPONS',
+          catatan: escalationNote || 'Pemanggilan resmi tingkat prodi dijadwalkan.',
+        });
+      } catch (err) {
+        showToastMessage(err.message || 'Gagal memperbarui eskalasi di backend.', 'error');
+        return;
+      }
+    }
 
     setEscalations((prev) =>
       prev.map((item) =>
@@ -552,10 +658,26 @@ export default function App() {
   // ============================================================================
   const totalWeight = weights.ta + weights.akademik + weights.sskm + weights.keuangan;
 
-  const handleSaveConfig = () => {
+  const handleSaveConfig = async () => {
     if (totalWeight !== 100) {
       showToastMessage(`Total bobot harus tepat 100% (saat ini ${totalWeight}%).`, 'error');
       return;
+    }
+
+    if (currentUser?.raw) {
+      try {
+        await api.updateConfig({
+          BOBOT_TA: weights.ta,
+          BOBOT_AKADEMIK: weights.akademik,
+          BOBOT_SSKM: weights.sskm,
+          BOBOT_KEUANGAN: weights.keuangan,
+          N_HARI: escalationParams.nDays,
+          M_HARI: escalationParams.mDays,
+        });
+      } catch (err) {
+        showToastMessage(err.message || 'Gagal menyimpan konfigurasi ke backend.', 'error');
+        return;
+      }
     }
 
     const newAudit = {
@@ -572,23 +694,31 @@ export default function App() {
     showToastMessage('Konfigurasi aturan disimpan & dicatat ke audit_log.');
   };
 
-  const handleManualScan = () => {
+  const handleManualScan = async () => {
     if (isScanning) return;
     setIsScanning(true);
-    setTimeout(() => {
-      setIsScanning(false);
+    try {
+      let scannedCount = '1.248';
+      if (currentUser?.raw) {
+        const res = await api.triggerScan();
+        if (res?.jmlMahasiswa !== undefined) scannedCount = String(res.jmlMahasiswa);
+      }
       const scanAudit = {
         id: `AUD-${101 + auditLogs.length}`,
         waktu: 'Hari ini • Baru saja',
         kategori: 'Pemindaian',
-        aktivitas: 'Manual scan selesai • 1.248 mahasiswa dipindai',
+        aktivitas: `Manual scan selesai • ${scannedCount} mahasiswa dipindai`,
         kanal: 'ADM-001 (Manual)',
         status: 'Berhasil',
         badgeType: 'success'
       };
       setAuditLogs([scanAudit, ...auditLogs]);
       showToastMessage('Pemindaian manual (POST /scans) selesai dijalankan.');
-    }, 1200);
+    } catch (err) {
+      showToastMessage(err.message || 'Gagal menjalankan pemindaian manual.', 'error');
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   // ============================================================================

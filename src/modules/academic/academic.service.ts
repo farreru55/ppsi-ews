@@ -4,10 +4,10 @@ export class AcademicService {
   static async getAcademicSummary(nim: string) {
     // 1. Snapshot akademik
     const akadRes = await query(
-      `SELECT sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi, tgl_ambil
-       FROM akademik_snapshot
+      `SELECT sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi, scan_id
+       FROM snapshot_mahasiswa
        WHERE nim = $1
-       ORDER BY tgl_ambil DESC LIMIT 1`,
+       ORDER BY snapshot_id DESC LIMIT 1`,
       [nim]
     );
 

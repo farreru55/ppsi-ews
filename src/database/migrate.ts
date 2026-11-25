@@ -11,7 +11,7 @@ export const runMigration = async () => {
   const client = await pool.connect();
   try {
     await client.query(sql);
-    logger.info('Migrasi 26 tabel, view, dan trigger PostgreSQL berhasil diterapkan!');
+    logger.info('Migrasi 22 tabel, 6 view, dan 2 materialized view PostgreSQL berhasil diterapkan!');
   } catch (err: any) {
     logger.error('Gagal menjalankan migrasi:', err.message);
     throw err;

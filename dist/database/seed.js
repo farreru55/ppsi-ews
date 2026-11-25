@@ -47,13 +47,13 @@ const seedData = async () => {
   `);
     // 5. Mahasiswa
     await (0, database_1.query)(`
-    INSERT INTO mahasiswa (nim, nama, prodi_id, angkatan, tgl_masuk, status_aktif, no_wa, email) VALUES
-      ('26410105001', 'Bagus Tilas Hidayatullah', 1, 2024, '2024-09-01', true, '6281234567801', '26410105001@dinamika.ac.id'),
-      ('24410100016', 'Farrel Endra Asrory', 1, 2021, '2021-09-01', true, '6281234567802', '24410100016@dinamika.ac.id'),
-      ('24410100007', 'Michael Christopher', 1, 2020, '2020-09-01', true, '6281234567803', '24410100007@dinamika.ac.id'),
-      ('24410100013', 'Novian Ardi Zulfikar', 1, 2022, '2022-09-01', true, '6281234567804', '24410100013@dinamika.ac.id'),
-      ('24410100015', 'Dimitri Yusuf Prabowo', 1, 2021, '2021-09-01', true, '6281234567805', '24410100015@dinamika.ac.id'),
-      ('24410100017', 'Rafi Firdaus Fauzi', 1, 2021, '2021-09-01', true, '6281234567806', '24410100017@dinamika.ac.id')
+    INSERT INTO mahasiswa (nim, nama, prodi_id, tgl_masuk, status_aktif, no_wa, email) VALUES
+      ('26410105001', 'Bagus Tilas Hidayatullah', 1, '2024-09-01', true, '6281234567801', '26410105001@dinamika.ac.id'),
+      ('24410100016', 'Farrel Endra Asrory', 1, '2021-09-01', true, '6281234567802', '24410100016@dinamika.ac.id'),
+      ('24410100007', 'Michael Christopher', 1, '2020-09-01', true, '6281234567803', '24410100007@dinamika.ac.id'),
+      ('24410100013', 'Novian Ardi Zulfikar', 1, '2022-09-01', true, '6281234567804', '24410100013@dinamika.ac.id'),
+      ('24410100015', 'Dimitri Yusuf Prabowo', 1, '2021-09-01', true, '6281234567805', '24410100015@dinamika.ac.id'),
+      ('24410100017', 'Rafi Firdaus Fauzi', 1, '2021-09-01', true, '6281234567806', '24410100017@dinamika.ac.id')
     ON CONFLICT (nim) DO NOTHING;
   `);
     // 6. Users & User Roles
@@ -96,8 +96,8 @@ const seedData = async () => {
     // 8. Tugas Akhir & Milestone & Bimbingan
     // Mahasiswa 24410100007: TA diperpanjang 2 semester (Memicu BRL-04 Override jika SSKM < ambang)
     const ta1 = await (0, database_1.query)(`
-    INSERT INTO tugas_akhir (nim, jenis, judul, semester_mulai_id, jml_perpanjangan, status_bebas_pustaka)
-    VALUES ('24410100007', 'TA', 'Rancang Bangun EWS Smart University', 1, 2, false)
+    INSERT INTO tugas_akhir (nim, jenis, judul, semester_mulai_id, jml_perpanjangan, tgl_bebas_pustaka)
+    VALUES ('24410100007', 'TA', 'Rancang Bangun EWS Smart University', 1, 2, NULL)
     ON CONFLICT DO NOTHING RETURNING ta_id;
   `);
     if (ta1.rows.length > 0) {
@@ -120,8 +120,8 @@ const seedData = async () => {
     }
     // Mahasiswa 24410100015: Bimbingan macet > 30 hari
     const ta2 = await (0, database_1.query)(`
-    INSERT INTO tugas_akhir (nim, jenis, judul, semester_mulai_id, jml_perpanjangan, status_bebas_pustaka)
-    VALUES ('24410100015', 'TA', 'Sistem Pakar Diagnosa Penyakit', 1, 1, false)
+    INSERT INTO tugas_akhir (nim, jenis, judul, semester_mulai_id, jml_perpanjangan, tgl_bebas_pustaka)
+    VALUES ('24410100015', 'TA', 'Sistem Pakar Diagnosa Penyakit', 1, 1, NULL)
     ON CONFLICT DO NOTHING RETURNING ta_id;
   `);
     if (ta2.rows.length > 0) {
@@ -139,88 +139,55 @@ const seedData = async () => {
       ON CONFLICT DO NOTHING;
     `);
     }
-    // 9. Akademik Snapshot & Presensi Matkul
-    // 26410105001: Sangat Bagus (IPK 3.85, Bebas nilai E, Sisa studi 6)
+    // 9. Mata Kuliah (Master)
     await (0, database_1.query)(`
-    INSERT INTO akademik_snapshot (nim, semester_id, sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi)
-    VALUES ('26410105001', 2, 45, 3.85, 0, 0, 500, 6)
-    ON CONFLICT DO NOTHING;
+    INSERT INTO mata_kuliah (kode_mk, nama_mk, sks) VALUES
+      ('SI101', 'Pengembangan Sistem Informasi', 3),
+      ('SI102', 'Basis Data Lanjut', 3),
+      ('SI301', 'Arsitektur Enterprise', 3),
+      ('SI302', 'Tata Kelola TI', 3)
+    ON CONFLICT (kode_mk) DO NOTHING;
   `);
+    // 10. Scan Run awal untuk snapshot
+    const scanRes = await (0, database_1.query)(`
+    INSERT INTO scan_run (semester_id, jenis, status, jml_mahasiswa)
+    VALUES (2, 'ULANG', 'SELESAI', 6)
+    RETURNING scan_id;
+  `);
+    const scanId = scanRes.rows[0].scan_id;
+    // 11. Snapshot Mahasiswa (Gabungan Akademik, SSKM, Event, Keuangan tanpa nominal BRL-14)
     await (0, database_1.query)(`
-    INSERT INTO presensi_matkul (nim, semester_id, kode_mk, nama_mk, jml_pertemuan, jml_hadir) VALUES
-      ('26410105001', 2, 'SI101', 'Pengembangan Sistem Informasi', 14, 14),
-      ('26410105001', 2, 'SI102', 'Basis Data Lanjut', 14, 13)
-    ON CONFLICT DO NOTHING;
+    INSERT INTO snapshot_mahasiswa (
+      scan_id, nim, sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi,
+      total_poin_sskm, jml_event_wajib_terlewat, status_ukt, memblokir_pendaftaran
+    ) VALUES
+      (${scanId}, '26410105001', 45, 3.85, 0, 0, 500, 6, 180, 0, 'LUNAS', false),
+      (${scanId}, '24410100016', 130, 3.40, 1, 0, 480, 2, 120, 0, 'LUNAS', false),
+      (${scanId}, '24410100007', 132, 2.75, 2, 1, 410, 1, 70, 1, 'LUNAS', false),
+      (${scanId}, '24410100013', 85, 2.90, 1, 0, 430, 4, 90, 0, 'LUNAS', false),
+      (${scanId}, '24410100015', 125, 3.10, 0, 0, 460, 2, 110, 0, 'LUNAS', false),
+      (${scanId}, '24410100017', 128, 3.20, 0, 0, 470, 2, 105, 0, 'MENUNGGAK', true)
+    ON CONFLICT (scan_id, nim) DO NOTHING;
   `);
-    // 24410100016: Farrel (Sisa studi 2 semester -> BRL-09 minimal Kuning)
+    // 12. Presensi Matkul
     await (0, database_1.query)(`
-    INSERT INTO akademik_snapshot (nim, semester_id, sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi)
-    VALUES ('24410100016', 2, 130, 3.40, 1, 0, 480, 2)
-    ON CONFLICT DO NOTHING;
+    INSERT INTO presensi_matkul (scan_id, nim, kode_mk, jml_pertemuan, jml_hadir) VALUES
+      (${scanId}, '26410105001', 'SI101', 14, 14),
+      (${scanId}, '26410105001', 'SI102', 14, 13),
+      (${scanId}, '24410100013', 'SI301', 14, 9),
+      (${scanId}, '24410100013', 'SI302', 14, 8)
+    ON CONFLICT (scan_id, nim, kode_mk) DO NOTHING;
   `);
-    // 24410100007: Michael (Sisa studi 1 semester, Nilai E = 1)
+    // 13. Progres Praktikum Smart Laboratory
     await (0, database_1.query)(`
-    INSERT INTO akademik_snapshot (nim, semester_id, sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi)
-    VALUES ('24410100007', 2, 132, 2.75, 2, 1, 410, 1)
-    ON CONFLICT DO NOTHING;
+    INSERT INTO progres_praktikum (scan_id, nim, kode_praktikum, status_lulus, jml_penggunaan_lab) VALUES
+      (${scanId}, '26410105001', 'LAB-SI-01', true, 10),
+      (${scanId}, '24410100016', 'LAB-SI-02', true, 12),
+      (${scanId}, '24410100007', 'LAB-SI-02', false, 4),
+      (${scanId}, '24410100015', 'LAB-SI-02', true, 14)
+    ON CONFLICT (scan_id, nim, kode_praktikum) DO NOTHING;
   `);
-    // 24410100013: Novian (Presensi rendah < 75% dan alpha > 2)
-    await (0, database_1.query)(`
-    INSERT INTO akademik_snapshot (nim, semester_id, sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi)
-    VALUES ('24410100013', 2, 85, 2.90, 1, 0, 430, 4)
-    ON CONFLICT DO NOTHING;
-  `);
-    await (0, database_1.query)(`
-    INSERT INTO presensi_matkul (nim, semester_id, kode_mk, nama_mk, jml_pertemuan, jml_hadir) VALUES
-      ('24410100013', 2, 'SI301', 'Arsitektur Enterprise', 14, 9),
-      ('24410100013', 2, 'SI302', 'Tata Kelola TI', 14, 8)
-    ON CONFLICT DO NOTHING;
-  `);
-    // 24410100015: Dimitri
-    await (0, database_1.query)(`
-    INSERT INTO akademik_snapshot (nim, semester_id, sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi)
-    VALUES ('24410100015', 2, 125, 3.10, 0, 0, 460, 2)
-    ON CONFLICT DO NOTHING;
-  `);
-    // 24410100017: Rafi
-    await (0, database_1.query)(`
-    INSERT INTO akademik_snapshot (nim, semester_id, sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi)
-    VALUES ('24410100017', 2, 128, 3.20, 0, 0, 470, 2)
-    ON CONFLICT DO NOTHING;
-  `);
-    // 10. SSKM Snapshot & Event Wajib
-    // 26410105001: SSKM tinggi (180 > 100)
-    await (0, database_1.query)(`INSERT INTO sskm_snapshot (nim, total_poin) VALUES ('26410105001', 180) ON CONFLICT DO NOTHING;`);
-    await (0, database_1.query)(`INSERT INTO kehadiran_event (nim, nama_event, tgl_event, wajib, hadir) VALUES ('26410105001', 'Upacara Dies Natalis', '2024-10-10', true, true) ON CONFLICT DO NOTHING;`);
-    // 24410100007: SSKM rendah (70 < 100 ambang batas) -> Digabung TA perpanjangan 2 sem memicu Override BRL-04
-    await (0, database_1.query)(`INSERT INTO sskm_snapshot (nim, total_poin) VALUES ('24410100007', 70) ON CONFLICT DO NOTHING;`);
-    await (0, database_1.query)(`INSERT INTO kehadiran_event (nim, nama_event, tgl_event, wajib, hadir) VALUES ('24410100007', 'Upacara Hari Kemerdekaan', '2024-08-17', true, false) ON CONFLICT DO NOTHING;`);
-    await (0, database_1.query)(`INSERT INTO sskm_snapshot (nim, total_poin) VALUES ('24410100016', 120) ON CONFLICT DO NOTHING;`);
-    await (0, database_1.query)(`INSERT INTO sskm_snapshot (nim, total_poin) VALUES ('24410100013', 90) ON CONFLICT DO NOTHING;`);
-    await (0, database_1.query)(`INSERT INTO sskm_snapshot (nim, total_poin) VALUES ('24410100015', 110) ON CONFLICT DO NOTHING;`);
-    await (0, database_1.query)(`INSERT INTO sskm_snapshot (nim, total_poin) VALUES ('24410100017', 105) ON CONFLICT DO NOTHING;`);
-    // 11. Status Keuangan (BRL-14: privasi tanpa nominal rupiah)
-    // 24410100017: Menunggak dan memblokir pendaftaran (BRL-08 -> minimal Kuning)
-    await (0, database_1.query)(`
-    INSERT INTO status_keuangan (nim, semester_id, status, memblokir_pendaftaran) VALUES
-      ('26410105001', 2, 'LUNAS', false),
-      ('24410100016', 2, 'LUNAS', false),
-      ('24410100007', 2, 'LUNAS', false),
-      ('24410100013', 2, 'LUNAS', false),
-      ('24410100015', 2, 'LUNAS', false),
-      ('24410100017', 2, 'MENUNGGAK', true)
-    ON CONFLICT DO NOTHING;
-  `);
-    // 12. Progres Praktikum Smart Laboratory
-    await (0, database_1.query)(`
-    INSERT INTO progres_praktikum (nim, kode_praktikum, status_lulus, jml_penggunaan_lab) VALUES
-      ('26410105001', 'LAB-SI-01', true, 10),
-      ('24410100016', 'LAB-SI-02', true, 12),
-      ('24410100007', 'LAB-SI-02', false, 4),
-      ('24410100015', 'LAB-SI-02', true, 14)
-    ON CONFLICT DO NOTHING;
-  `);
-    // 13. Jalankan kalkulasi batch scan awal agar tabel risk_score terisi!
+    // 14. Jalankan kalkulasi batch scan awal agar tabel risk_score terisi!
     logger_util_1.logger.info('Menjalankan pemindaian kalkulasi risiko awal untuk 6 mahasiswa seed...');
     const scanResult = await risk_service_1.RiskService.runBatchScan('ULANG', 2);
     logger_util_1.logger.info(`Pemindaian awal selesai. ${scanResult.jmlMahasiswa} mahasiswa terhitung.`);

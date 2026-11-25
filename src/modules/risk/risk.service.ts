@@ -105,7 +105,7 @@ export class RiskService {
   ): Promise<StudentRiskCalculationResult> {
     // 1. Ambil info mahasiswa & prodi
     const mhsRes = await query(
-      `SELECT m.nim, m.nama, m.prodi_id, m.angkatan, m.status_aktif 
+      `SELECT m.nim, m.nama, m.prodi_id, EXTRACT(YEAR FROM m.tgl_masuk)::int AS angkatan, m.status_aktif 
        FROM mahasiswa m WHERE m.nim = $1`,
       [nim]
     );
@@ -131,7 +131,7 @@ export class RiskService {
     let taBerlaku = false;
 
     const taRes = await query(
-      `SELECT ta.ta_id, ta.jenis, ta.jml_perpanjangan, ta.status_bebas_pustaka, ta.tgl_batas,
+      `SELECT ta.ta_id, ta.jenis, ta.jml_perpanjangan, (ta.tgl_bebas_pustaka IS NOT NULL) AS status_bebas_pustaka, ta.tgl_batas,
               (SELECT MAX(tgl_bimbingan) FROM bimbingan_log WHERE ta_id = ta.ta_id) as tgl_bimbingan_terakhir,
               (SELECT COUNT(*) FROM bimbingan_log WHERE ta_id = ta.ta_id AND terverifikasi = true) as jml_bimbingan_valid,
               tm.tahap as tahap_aktif, tm.status as status_milestone, tm.tgl_mulai as tgl_mulai_milestone
@@ -210,9 +210,9 @@ export class RiskService {
     let skorAkademik: number | null = null;
     const akadRes = await query(
       `SELECT sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi
-       FROM akademik_snapshot 
+       FROM snapshot_mahasiswa 
        WHERE nim = $1 
-       ORDER BY tgl_ambil DESC LIMIT 1`,
+       ORDER BY snapshot_id DESC LIMIT 1`,
       [nim]
     );
 
@@ -227,11 +227,12 @@ export class RiskService {
 
       // Presensi per mata kuliah semester berjalan
       const presensiRes = await query(
-        `SELECT kode_mk, nama_mk, jml_pertemuan, jml_hadir,
-                ROUND((jml_hadir::numeric / NULLIF(jml_pertemuan, 0) * 100), 2) as persentase,
-                (jml_pertemuan - jml_hadir) as jml_alpha
-         FROM presensi_matkul
-         WHERE nim = $1`,
+        `SELECT pm.kode_mk, mk.nama_mk, pm.jml_pertemuan, pm.jml_hadir,
+                ROUND((pm.jml_hadir::numeric / NULLIF(pm.jml_pertemuan, 0) * 100), 2) as persentase,
+                (pm.jml_pertemuan - pm.jml_hadir) as jml_alpha
+         FROM presensi_matkul pm
+         JOIN mata_kuliah mk ON pm.kode_mk = mk.kode_mk
+         WHERE pm.nim = $1`,
         [nim]
       );
 
@@ -296,7 +297,7 @@ export class RiskService {
     let totalPoinSskm = 0;
 
     const sskmRes = await query(
-      `SELECT total_poin FROM sskm_snapshot WHERE nim = $1 ORDER BY tgl_ambil DESC LIMIT 1`,
+      `SELECT total_poin_sskm AS total_poin, jml_event_wajib_terlewat FROM snapshot_mahasiswa WHERE nim = $1 ORDER BY snapshot_id DESC LIMIT 1`,
       [nim]
     );
 
@@ -316,19 +317,13 @@ export class RiskService {
         });
       }
 
-      // Event wajib
-      const eventRes = await query(
-        `SELECT nama_event, hadir FROM kehadiran_event WHERE nim = $1 AND wajib = true`,
-        [nim]
-      );
-
-      const missedEvents = eventRes.rows.filter((e) => !e.hadir);
-      if (missedEvents.length > 0) {
+      const missedCount = Number(sskmRes.rows[0].jml_event_wajib_terlewat || 0);
+      if (missedCount > 0) {
         rawPointsSskm += proposedPoints.sskm.eventWajibAbsen;
         detailPemicu.nonAkademik.push({
           kode: 'EVENT_WAJIB_TERLEWAT',
-          pesan: `Terdapat ${missedEvents.length} event/upacara wajib kampus yang belum dihadiri`,
-          daftar: missedEvents.map((e) => e.nama_event),
+          pesan: `Terdapat ${missedCount} event/upacara wajib kampus yang belum dihadiri`,
+          jumlah: missedCount,
         });
       }
 
@@ -340,8 +335,8 @@ export class RiskService {
     let tunggakanMemblokir = false;
 
     const keuRes = await query(
-      `SELECT status, memblokir_pendaftaran FROM status_keuangan 
-       WHERE nim = $1 ORDER BY tgl_ambil DESC LIMIT 1`,
+      `SELECT status_ukt AS status, memblokir_pendaftaran FROM snapshot_mahasiswa 
+       WHERE nim = $1 ORDER BY snapshot_id DESC LIMIT 1`,
       [nim]
     );
 

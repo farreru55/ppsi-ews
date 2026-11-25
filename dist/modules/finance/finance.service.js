@@ -9,8 +9,9 @@ class FinanceService {
     static async getStudentFinanceStatus(nim) {
         const res = await (0, database_1.query)(`SELECT sk.keuangan_id, sk.status, sk.memblokir_pendaftaran, sk.tgl_ambil,
               s.tahun_ajaran, s.jenis as jenis_semester
-       FROM status_keuangan sk
-       JOIN semester s ON sk.semester_id = s.semester_id
+       FROM snapshot_mahasiswa sk
+       JOIN scan_run sr ON sk.scan_id = sr.scan_id
+       JOIN semester s ON sr.semester_id = s.semester_id
        WHERE sk.nim = $1
        ORDER BY sk.tgl_ambil DESC LIMIT 1`, [nim]);
         if (res.rows.length === 0) {

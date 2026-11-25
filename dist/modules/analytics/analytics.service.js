@@ -22,7 +22,7 @@ class AnalyticsService {
         ) AS rasio_ktw_potensial
       FROM program_studi p
       JOIN mahasiswa m ON p.prodi_id = m.prodi_id AND m.status_aktif = true
-      LEFT JOIN v_student_risk_latest v ON m.nim = v.nim
+      LEFT JOIN vw_risk_terkini v ON m.nim = v.nim
     `;
         const params = [];
         if (prodiId) {
@@ -33,7 +33,7 @@ class AnalyticsService {
         const res = await (0, database_1.query)(sql, params);
         // Ambil bottleneck analytics
         const bottleneckSql = `
-      SELECT * FROM v_ta_bottlenecks
+      SELECT * FROM mv_bottleneck_milestone
       ${prodiId ? ' WHERE prodi_id = $1 ' : ''}
     `;
         const bottleneckRes = await (0, database_1.query)(bottleneckSql, params);

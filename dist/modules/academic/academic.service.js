@@ -5,10 +5,10 @@ const database_1 = require("../../config/database");
 class AcademicService {
     static async getAcademicSummary(nim) {
         // 1. Snapshot akademik
-        const akadRes = await (0, database_1.query)(`SELECT sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi, tgl_ambil
-       FROM akademik_snapshot
+        const akadRes = await (0, database_1.query)(`SELECT sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi, scan_id
+       FROM snapshot_mahasiswa
        WHERE nim = $1
-       ORDER BY tgl_ambil DESC LIMIT 1`, [nim]);
+       ORDER BY snapshot_id DESC LIMIT 1`, [nim]);
         const snapshot = akadRes.rows[0] || null;
         // 2. Presensi perkuliahan semester berjalan
         const presensiRes = await (0, database_1.query)(`SELECT presensi_id, kode_mk, nama_mk, jml_pertemuan, jml_hadir,

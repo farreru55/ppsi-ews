@@ -83,7 +83,7 @@ class StudentsService {
       FROM relasi_bimbingan rb
       JOIN mahasiswa m ON rb.nim = m.nim
       JOIN program_studi p ON m.prodi_id = p.prodi_id
-      LEFT JOIN v_student_risk_latest v ON m.nim = v.nim
+      LEFT JOIN vw_risk_terkini v ON m.nim = v.nim
       ${whereSql}
       ORDER BY 
         CASE WHEN v.status = 'MERAH' THEN 1 WHEN v.status = 'KUNING' THEN 2 ELSE 3 END,

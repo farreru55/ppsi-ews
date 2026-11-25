@@ -60,7 +60,7 @@ class RiskService {
      */
     static async calculateStudentRisk(nim, proposedPoints = exports.DEFAULT_PROPOSED_POINTS) {
         // 1. Ambil info mahasiswa & prodi
-        const mhsRes = await (0, database_1.query)(`SELECT m.nim, m.nama, m.prodi_id, m.angkatan, m.status_aktif 
+        const mhsRes = await (0, database_1.query)(`SELECT m.nim, m.nama, m.prodi_id, EXTRACT(YEAR FROM m.tgl_masuk)::int AS angkatan, m.status_aktif 
        FROM mahasiswa m WHERE m.nim = $1`, [nim]);
         if (mhsRes.rows.length === 0) {
             throw new Error(`Mahasiswa dengan NIM ${nim} tidak ditemukan`);
@@ -77,7 +77,7 @@ class RiskService {
         // 2. Evaluasi Pilar TA / Skripsi
         let skorTa = null;
         let taBerlaku = false;
-        const taRes = await (0, database_1.query)(`SELECT ta.ta_id, ta.jenis, ta.jml_perpanjangan, ta.status_bebas_pustaka, ta.tgl_batas,
+        const taRes = await (0, database_1.query)(`SELECT ta.ta_id, ta.jenis, ta.jml_perpanjangan, (ta.tgl_bebas_pustaka IS NOT NULL) AS status_bebas_pustaka, ta.tgl_batas,
               (SELECT MAX(tgl_bimbingan) FROM bimbingan_log WHERE ta_id = ta.ta_id) as tgl_bimbingan_terakhir,
               (SELECT COUNT(*) FROM bimbingan_log WHERE ta_id = ta.ta_id AND terverifikasi = true) as jml_bimbingan_valid,
               tm.tahap as tahap_aktif, tm.status as status_milestone, tm.tgl_mulai as tgl_mulai_milestone
@@ -145,9 +145,9 @@ class RiskService {
         // 3. Evaluasi Pilar Akademik
         let skorAkademik = null;
         const akadRes = await (0, database_1.query)(`SELECT sks_lulus, ipk, jml_nilai_d, jml_nilai_e, skor_toefl, sisa_masa_studi
-       FROM akademik_snapshot 
+       FROM snapshot_mahasiswa 
        WHERE nim = $1 
-       ORDER BY tgl_ambil DESC LIMIT 1`, [nim]);
+       ORDER BY snapshot_id DESC LIMIT 1`, [nim]);
         let sisaMasaStudi = 8;
         if (akadRes.rows.length === 0) {
             dataTidakLengkap = true;
@@ -157,11 +157,12 @@ class RiskService {
             sisaMasaStudi = Number(akad.sisa_masa_studi);
             let rawPointsAkad = 0;
             // Presensi per mata kuliah semester berjalan
-            const presensiRes = await (0, database_1.query)(`SELECT kode_mk, nama_mk, jml_pertemuan, jml_hadir,
-                ROUND((jml_hadir::numeric / NULLIF(jml_pertemuan, 0) * 100), 2) as persentase,
-                (jml_pertemuan - jml_hadir) as jml_alpha
-         FROM presensi_matkul
-         WHERE nim = $1`, [nim]);
+            const presensiRes = await (0, database_1.query)(`SELECT pm.kode_mk, mk.nama_mk, pm.jml_pertemuan, pm.jml_hadir,
+                ROUND((pm.jml_hadir::numeric / NULLIF(pm.jml_pertemuan, 0) * 100), 2) as persentase,
+                (pm.jml_pertemuan - pm.jml_hadir) as jml_alpha
+         FROM presensi_matkul pm
+         JOIN mata_kuliah mk ON pm.kode_mk = mk.kode_mk
+         WHERE pm.nim = $1`, [nim]);
             let adaPresensiRendah = false;
             let adaAlphaTinggi = false;
             for (const p of presensiRes.rows) {
@@ -215,7 +216,7 @@ class RiskService {
         // 4. Evaluasi Pilar Non-Akademik / SSKM
         let skorNonAkademik = null;
         let totalPoinSskm = 0;
-        const sskmRes = await (0, database_1.query)(`SELECT total_poin FROM sskm_snapshot WHERE nim = $1 ORDER BY tgl_ambil DESC LIMIT 1`, [nim]);
+        const sskmRes = await (0, database_1.query)(`SELECT total_poin_sskm AS total_poin, jml_event_wajib_terlewat FROM snapshot_mahasiswa WHERE nim = $1 ORDER BY snapshot_id DESC LIMIT 1`, [nim]);
         if (sskmRes.rows.length === 0) {
             dataTidakLengkap = true;
         }
@@ -231,15 +232,13 @@ class RiskService {
                     ambang: config.ambangSskmProdi,
                 });
             }
-            // Event wajib
-            const eventRes = await (0, database_1.query)(`SELECT nama_event, hadir FROM kehadiran_event WHERE nim = $1 AND wajib = true`, [nim]);
-            const missedEvents = eventRes.rows.filter((e) => !e.hadir);
-            if (missedEvents.length > 0) {
+            const missedCount = Number(sskmRes.rows[0].jml_event_wajib_terlewat || 0);
+            if (missedCount > 0) {
                 rawPointsSskm += proposedPoints.sskm.eventWajibAbsen;
                 detailPemicu.nonAkademik.push({
                     kode: 'EVENT_WAJIB_TERLEWAT',
-                    pesan: `Terdapat ${missedEvents.length} event/upacara wajib kampus yang belum dihadiri`,
-                    daftar: missedEvents.map((e) => e.nama_event),
+                    pesan: `Terdapat ${missedCount} event/upacara wajib kampus yang belum dihadiri`,
+                    jumlah: missedCount,
                 });
             }
             skorNonAkademik = Math.min(100, rawPointsSskm);
@@ -247,8 +246,8 @@ class RiskService {
         // 5. Evaluasi Pilar Keuangan (Tanpa Nominal Rupiah - BRL-14)
         let skorKeuangan = null;
         let tunggakanMemblokir = false;
-        const keuRes = await (0, database_1.query)(`SELECT status, memblokir_pendaftaran FROM status_keuangan 
-       WHERE nim = $1 ORDER BY tgl_ambil DESC LIMIT 1`, [nim]);
+        const keuRes = await (0, database_1.query)(`SELECT status_ukt AS status, memblokir_pendaftaran FROM snapshot_mahasiswa 
+       WHERE nim = $1 ORDER BY snapshot_id DESC LIMIT 1`, [nim]);
         if (keuRes.rows.length === 0) {
             dataTidakLengkap = true;
         }
