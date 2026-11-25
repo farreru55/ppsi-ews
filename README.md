@@ -1,7 +1,6 @@
 # Early Warning System (EWS) Keterlambatan Kelulusan Mahasiswa - Backend REST API
 
-Backend REST API untuk sistem pendukung keputusan (Decision Support System) **Early Warning System (EWS) Keterlambatan Kelulusan Mahasiswa** Universitas Dinamika berbasis **Node.js + Express.js + TypeScript + PostgreSQL**, mengimplementasikan seluruh aturan bisnis dalam `EWS_Dokumen_UTS.md` (BRL-01 s/d BRL-16).
-
+Backend REST API untuk sistem pendukung keputusan (Decision Support System) **Early Warning System (EWS) Keterlambatan Kelulusan Mahasiswa** Universitas Dinamika berbasis **Node.js + Express.js + TypeScript + PostgreSQL**, 
 ---
 
 ## 1. Fitur Utama
