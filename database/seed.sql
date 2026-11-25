@@ -192,7 +192,7 @@ LATERAL generate_series(1, ta.n) k;
 -- ---------------------------------------------------------------------
 INSERT INTO scan_run (semester_id, jenis_scan_run, waktu_mulai, waktu_selesai, status) VALUES
   (4, 'TENGAH', '2026-04-06 01:00', '2026-04-06 01:42', 'SELESAI'),
-  (4, 'AKHIR',  '2026-07-06 01:00', '2026-07-06 01:55', 'SEBAGIAN'),   -- SIM-TA gagal
+  (4, 'AKHIR',  '2026-07-06 01:00', '2026-07-06 01:55', 'SEBAGIAN'),
   (5, 'TENGAH', '2026-11-02 01:00', '2026-11-02 01:48', 'SELESAI');
 
 CREATE TEMP TABLE tmp_snap ON COMMIT DROP AS
@@ -293,18 +293,8 @@ CROSS JOIN LATERAL (
 
 UPDATE scan_run SET jml_mahasiswa = (SELECT COUNT(*) FROM snapshot_mahasiswa x WHERE x.scan_id = scan_run.scan_id);
 
--- sync_log (scan 2: SIM-TA gagal)
-INSERT INTO sync_log (scan_id, sumber, status, jml_record, error_message, waktu)
-SELECT s.scan_id, src,
-       CASE WHEN s.scan_id = 2 AND src = 'SIM_TA' THEN 'GAGAL' ELSE 'BERHASIL' END,
-       CASE WHEN s.scan_id = 2 AND src = 'SIM_TA' THEN NULL
-            ELSE (SELECT COUNT(*) FROM snapshot_mahasiswa x WHERE x.scan_id = s.scan_id)::int END,
-       CASE WHEN s.scan_id = 2 AND src = 'SIM_TA' THEN 'Timeout koneksi ke SIM-TA (HTTP 504)' END,
-       s.waktu_mulai + interval '3 minutes'
-FROM scan_run s, unnest(ARRAY['SIAKAD','SIM_TA','KEUANGAN','KEMAHASISWAAN','SMART_LAB']) AS src;
-
 -- ---------------------------------------------------------------------
--- 6. TINDAK LANJUT: action plan, notifikasi, eskalasi, konseling (scan terbaru = 3)
+-- 6. TINDAK LANJUT: action plan, notifikasi, konseling (scan terbaru = 3)
 -- ---------------------------------------------------------------------
 INSERT INTO action_plan (risk_id, sumber, deskripsi, status, tgl_target, tgl_dibuat)
 SELECT r.risk_id, 'AI_ADVISOR',
@@ -343,7 +333,7 @@ JOIN users u ON u.nim = r.nim,
 LATERAL (SELECT random() < 0.15 AS gagal) g
 WHERE r.scan_id = 3 AND r.status IN ('KUNING','MERAH');
 
--- Eskalasi untuk status Merah
+-- Eskalasi via tabel notifikasi untuk status Merah
 CREATE TEMP TABLE tmp_esk ON COMMIT DROP AS
 SELECT r.risk_id, rb.nidn, uw.user_id AS wali_uid, uk.user_id AS kap_uid, (random() < 0.6) AS resp
 FROM risk_score r
@@ -352,15 +342,6 @@ JOIN relasi_bimbingan rb ON rb.nim = r.nim AND rb.jenis_relasi = 'DOSEN_WALI'
 JOIN users uw ON uw.nidn = rb.nidn
 JOIN users uk ON uk.nidn = '07120588' || lpad((((m.prodi_id - 1) * 3) + 1)::text, 2, '0')
 WHERE r.scan_id = 3 AND r.status = 'MERAH';
-
-INSERT INTO escalation_log (risk_id, tingkat, penerima_user_id, waktu_eskalasi, status_respons, waktu_respons)
-SELECT risk_id, 'DOSEN_WALI', wali_uid, timestamp '2026-11-05 08:00',
-       CASE WHEN resp THEN 'DIRESPONS' ELSE 'BELUM' END,
-       CASE WHEN resp THEN timestamp '2026-11-06 10:00' END
-FROM tmp_esk
-UNION ALL
-SELECT risk_id, 'KAPRODI', kap_uid, timestamp '2026-11-16 08:00', 'BELUM', NULL
-FROM tmp_esk WHERE NOT resp;
 
 INSERT INTO notifikasi (risk_id, penerima_user_id, jenis_notifikasi, kanal, isi_pesan,
                         status_kirim, jml_percobaan, waktu_kirim, status_respons, waktu_respons)
@@ -395,10 +376,10 @@ FROM tmp_esk WHERE resp;
 -- 7. AUDIT LOG CONTOH
 -- ---------------------------------------------------------------------
 INSERT INTO audit_log (user_id, aksi, nama_tabel, record_id, data_baru, waktu, ip_address)
-SELECT NULL, 'SYNC_' || sumber, 'sync_log', sync_id::text,
-       jsonb_build_object('status', status, 'jumlah_record', jml_record, 'error', error_message),
-       waktu, NULL
-FROM sync_log;
+SELECT NULL, 'SCAN_' || jenis_scan_run, 'scan_run', scan_id::text,
+       jsonb_build_object('status', status, 'jumlah_mahasiswa', jml_mahasiswa),
+       COALESCE(waktu_selesai, waktu_mulai), NULL
+FROM scan_run;
 
 INSERT INTO audit_log (user_id, aksi, nama_tabel, record_id, waktu, ip_address)
 SELECT user_id, 'LOGIN', 'users', user_id::text, last_login,
