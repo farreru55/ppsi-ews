@@ -1,0 +1,313 @@
+### ==============================================================================
+### EARLY WARNING SYSTEM (EWS) KETERLAMBATAN KELULUSAN MAHASISWA
+### REST Client (.http) Test Suite — VS Code
+### ==============================================================================
+### Petunjuk:
+### 1. Jalankan backend terlebih dahulu: npm run dev
+### 2. Klik tombol "Send Request" yang muncul di atas setiap request.
+### 3. Ekstensi REST Client otomatis menyimpan access token dari hasil login
+###    ke request berikutnya menggunakan variabel {{loginXxx.response.body...}}.
+### ==============================================================================
+
+@baseUrl = http://localhost:5000/api/v1
+@apiKey = ews_smart_university_integration_api_key_xyz987
+
+### ------------------------------------------------------------------------------
+### 0. HEALTH CHECK
+### ------------------------------------------------------------------------------
+# @name healthCheck
+GET http://localhost:5000/health
+
+
+### ==============================================================================
+### 1. AUTENTIKASI (AUTH)
+### ==============================================================================
+
+### 1a. Login sebagai Mahasiswa: Bagus Tilas Hidayatullah (Status: HIJAU / Aman)
+# @name loginMahasiswa
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "26410105001",
+  "password": "password123"
+}
+
+### 1b. Login sebagai Mahasiswa: Michael Christopher (Status: MERAH / Red Alert Override)
+# @name loginMichael
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "24410100007",
+  "password": "password123"
+}
+
+### 1c. Login sebagai Dosen Wali & Dosbing TA: Bagus Satrio W., M.Kom
+# @name loginDoswal
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "doswal.bagus",
+  "password": "password123"
+}
+
+### 1d. Login sebagai Kaprodi S1 SI: Dr. Teguh Sutanto, M.Kom
+# @name loginKaprodi
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "kaprodi.si",
+  "password": "password123"
+}
+
+### 1e. Login sebagai Koordinator TA: Anik Vega Vitianingsih, M.T
+# @name loginKoordTa
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "koord.ta",
+  "password": "password123"
+}
+
+### 1f. Login sebagai Administrator EWS
+# @name loginAdmin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "password123"
+}
+
+### 1g. Uji Coba Login Gagal (Password Salah -> Harus 401)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "26410105001",
+  "password": "password_salah_123"
+}
+
+### 1h. Refresh Token (Perpanjang Access Token)
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{loginMahasiswa.response.body.data.refreshToken}}"
+}
+
+### 1i. Cek Profil Pengguna Login Saat Ini (/auth/me)
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{loginMahasiswa.response.body.data.accessToken}}
+
+
+### ==============================================================================
+### 2. MODUL MAHASISWA & RISIKO (STUDENTS & RISK)
+### ==============================================================================
+
+### 2a. Mahasiswa melihat status & skor risiko pribadi (/students/me/risk)
+GET {{baseUrl}}/students/me/risk
+Authorization: Bearer {{loginMahasiswa.response.body.data.accessToken}}
+
+### 2b. Dosen Wali melihat seluruh mahasiswa bimbingan at-risk (/advisees)
+GET {{baseUrl}}/advisees
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 2c. Dosen Wali filter advisees khusus status MERAH
+GET {{baseUrl}}/advisees?status=MERAH
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 2d. Dosen Wali filter advisees khusus angkatan 2021
+GET {{baseUrl}}/advisees?angkatan=2021
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 2e. Detail Risiko Mahasiswa Michael (MERAH - BRL-04 Override: TA >= 2 sem & SSKM < 100)
+GET {{baseUrl}}/students/24410100007/risk
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 2f. Detail Risiko Mahasiswa Dimitri (KUNING - Bimbingan macet 45 hari & sisa studi <= 2)
+GET {{baseUrl}}/students/24410100015/risk
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 2g. Detail Risiko Mahasiswa Novian (KUNING - Presensi < 75% & Alpha > 2x)
+GET {{baseUrl}}/students/24410100013/risk
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 2h. Detail Risiko Mahasiswa Farrel (KUNING - BRL-09: Sisa studi <= 2 semester)
+GET {{baseUrl}}/students/24410100016/risk
+Authorization: Bearer {{loginAdmin.response.body.data.accessToken}}
+
+### 2i. Detail Risiko Mahasiswa Rafi (KUNING - BRL-08: Tunggakan UKT memblokir sidang)
+GET {{baseUrl}}/students/24410100017/risk
+Authorization: Bearer {{loginAdmin.response.body.data.accessToken}}
+
+### 2j. [UJI SCOPING BRL-13] Mahasiswa coba akses data mahasiswa lain (HARUS DITOLAK 403)
+GET {{baseUrl}}/students/24410100007/risk
+Authorization: Bearer {{loginMahasiswa.response.body.data.accessToken}}
+
+### 2k. [UJI SCOPING BRL-13] Dosen coba akses mahasiswa yang BUKAN bimbingannya (HARUS DITOLAK 403)
+GET {{baseUrl}}/students/24410100016/risk
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+
+### ==============================================================================
+### 3. PELACAKAN MILESTONE TA & LOG BIMBINGAN (FR3, BRL-05)
+### ==============================================================================
+
+### 3a. Ambil alur milestone TA, status macet > 30 hari, dan syarat min. 8 bimbingan
+GET {{baseUrl}}/students/24410100007/milestones
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 3b. Cek milestone mahasiswa yang belum mengambil TA (pilar TA tidak berlaku)
+GET {{baseUrl}}/students/26410105001/milestones
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+
+### ==============================================================================
+### 4. KONSELING DOSEN WALI (APPEND-ONLY, BRL-16)
+### ==============================================================================
+
+### 4a. Dosen Wali mencatat sesi konseling dengan mahasiswa bimbingan
+POST {{baseUrl}}/students/24410100007/counseling
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+Content-Type: application/json
+
+{
+  "tglKonseling": "2026-11-25",
+  "catatan": "Mahasiswa mengalami kendala penulisan Bab 3 dan revisi tertunda. SSKM masih kurang 30 poin.",
+  "tindakLanjut": "Dijadwalkan asistensi mingguan intensif tiap Selasa dan diwajibkan mendaftar seminar akademik."
+}
+
+
+### ==============================================================================
+### 5. RENCANA TINDAKAN (ACTION PLANS)
+### ==============================================================================
+
+### 5a. Ambil daftar action plan perbaikan mahasiswa
+GET {{baseUrl}}/action-plans/24410100007
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 5b. Mahasiswa memperbarui status pengerjaan action plan (BELUM -> PROSES -> SELESAI)
+PATCH {{baseUrl}}/action-plans/1
+Authorization: Bearer {{loginMahasiswa.response.body.data.accessToken}}
+Content-Type: application/json
+
+{
+  "status": "PROSES"
+}
+
+
+### ==============================================================================
+### 6. ESKALASI BERJENJANG (ESCALATIONS - BRL-11)
+### ==============================================================================
+
+### 6a. Kaprodi melihat antrean eskalasi kasus mahasiswa Red Alert
+GET {{baseUrl}}/escalations
+Authorization: Bearer {{loginKaprodi.response.body.data.accessToken}}
+
+### 6b. Dosen Wali melihat eskalasi mahasiswa binaannya
+GET {{baseUrl}}/escalations
+Authorization: Bearer {{loginDoswal.response.body.data.accessToken}}
+
+### 6c. Kaprodi mencatat tindak lanjut kebijakan khusus atas eskalasi
+PATCH {{baseUrl}}/escalations/1
+Authorization: Bearer {{loginKaprodi.response.body.data.accessToken}}
+Content-Type: application/json
+
+{
+  "statusRespons": "DIRESPONS",
+  "catatanTindakLanjut": "Kaprodi memberikan dispensasi perpanjangan semester terakhir dan menetapkan tim pendamping TA."
+}
+
+
+### ==============================================================================
+### 7. ANALITIK KTW PRODI & EKSPOR LAPORAN (KAPRODI / ADMIN)
+### ==============================================================================
+
+### 7a. Kaprodi melihat Executive Health KTW Dashboard & Bottleneck TA
+GET {{baseUrl}}/analytics/ktw
+Authorization: Bearer {{loginKaprodi.response.body.data.accessToken}}
+
+### 7b. Ekspor Laporan Eksekutif Format PDF
+GET {{baseUrl}}/reports/export?format=pdf
+Authorization: Bearer {{loginKaprodi.response.body.data.accessToken}}
+
+### 7c. Ekspor Laporan Eksekutif Format Excel (XLSX)
+GET {{baseUrl}}/reports/export?format=xlsx
+Authorization: Bearer {{loginKaprodi.response.body.data.accessToken}}
+
+
+### ==============================================================================
+### 8. PENGATURAN BOBOT & AMBANG BATAS (CONFIG - ADMIN)
+### ==============================================================================
+
+### 8a. Admin membaca seluruh parameter konfigurasi aktif
+GET {{baseUrl}}/config
+Authorization: Bearer {{loginAdmin.response.body.data.accessToken}}
+
+### 8b. Admin memperbarui bobot / threshold (tersimpan dinamis tanpa re-deploy)
+PUT {{baseUrl}}/config
+Authorization: Bearer {{loginAdmin.response.body.data.accessToken}}
+Content-Type: application/json
+
+{
+  "parameter": "BOBOT_TA",
+  "nilai": 40.0,
+  "prodiId": null
+}
+
+
+### ==============================================================================
+### 9. MANUAL SCAN & AUDIT LOGS (ADMIN)
+### ==============================================================================
+
+### 9a. Admin memicu pemindaian manual seluruh mahasiswa aktif (202 Accepted)
+POST {{baseUrl}}/scans
+Authorization: Bearer {{loginAdmin.response.body.data.accessToken}}
+Content-Type: application/json
+
+{
+  "jenis": "ULANG"
+}
+
+### 9b. Admin membaca jejak audit aktivitas sistem (BRL-16 Append-Only)
+GET {{baseUrl}}/audit-logs?limit=15
+Authorization: Bearer {{loginAdmin.response.body.data.accessToken}}
+
+
+### ==============================================================================
+### 10. INTEGRASI EKOSISTEM SMART UNIVERSITY
+### ==============================================================================
+
+### 10a. Data Agregat untuk University Dashboard (Menggunakan API Key)
+GET {{baseUrl}}/integration/analytics/aggregate
+X-API-Key: {{apiKey}}
+
+### 10b. Daftar Mahasiswa Berisiko untuk Smart Scheduling (Prioritas Slot Kelas Ulang)
+GET {{baseUrl}}/integration/students/at-risk-courses
+X-API-Key: {{apiKey}}
+
+### 10c. Webhook Masuk dari AI Academic Advisor (Terverifikasi Signature HMAC-SHA256)
+POST {{baseUrl}}/integration/webhooks/ai-advisor
+Content-Type: application/json
+X-EWS-Signature: ae31e2457a2d9e51c376148e100d1778a82ee33ecd1f8885eb5c96833977a740
+
+{
+  "riskId": 1,
+  "deskripsi": "Saran AI Advisor: Ikuti klinik bimbingan skripsi mingguan dan tuntaskan sisa 30 poin SSKM.",
+  "tglTarget": "2026-12-15"
+}
+
+### 10d. Webhook Masuk dengan Signature Salah (Harus Ditolak 401)
+POST {{baseUrl}}/integration/webhooks/ai-advisor
+Content-Type: application/json
+X-EWS-Signature: invalid_hmac_signature_code_12345
+
+{
+  "riskId": 1,
+  "deskripsi": "Contoh payload dengan signature salah."
+}
