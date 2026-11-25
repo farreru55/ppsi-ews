@@ -9,13 +9,7 @@ BEGIN;
 -- ---------------------------------------------------------------------
 -- 0. ROLE DATABASE (Bagian A.10)
 -- ---------------------------------------------------------------------
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ews_app')      THEN CREATE ROLE ews_app NOLOGIN;      END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ews_etl')      THEN CREATE ROLE ews_etl NOLOGIN;      END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ews_readonly') THEN CREATE ROLE ews_readonly NOLOGIN; END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ews_admin')    THEN CREATE ROLE ews_admin NOLOGIN;    END IF;
-END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ews_app')      THEN CREATE ROLE ews_app NOLOGIN;      END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ews_etl')      THEN CREATE ROLE ews_etl NOLOGIN;      END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ews_readonly') THEN CREATE ROLE ews_readonly NOLOGIN; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ews_admin')    THEN CREATE ROLE ews_admin NOLOGIN;    END IF; END $$;
 
 -- ---------------------------------------------------------------------
 -- 1. DATA MASTER
@@ -160,26 +154,26 @@ CREATE TABLE scan_run (
 
 -- Snapshot read-only dari sistem sumber (SIAKAD, Kemahasiswaan, Keuangan)
 CREATE TABLE snapshot_mahasiswa (
-  snapshot_id          BIGSERIAL PRIMARY KEY,
-  scan_id              BIGINT NOT NULL REFERENCES scan_run(scan_id) ON DELETE RESTRICT,
-  nim                  VARCHAR(15) NOT NULL REFERENCES mahasiswa(nim) ON DELETE RESTRICT,
-  sks_lulus            SMALLINT,
-  ipk                  NUMERIC(3,2) CHECK (ipk BETWEEN 0 AND 4),
-  jml_nilai_d          SMALLINT,
-  jml_nilai_e          SMALLINT,
-  skor_toefl           SMALLINT,                            -- NULL bila belum ada
-  sisa_masa_studi      SMALLINT,                            -- dalam semester
-  total_poin_sskm      INTEGER,
+  snapshot_id              BIGSERIAL PRIMARY KEY,
+  scan_id                  BIGINT NOT NULL REFERENCES scan_run(scan_id) ON DELETE RESTRICT,
+  nim                      VARCHAR(15) NOT NULL REFERENCES mahasiswa(nim) ON DELETE RESTRICT,
+  sks_lulus                SMALLINT,
+  ipk                      NUMERIC(3,2) CHECK (ipk BETWEEN 0 AND 4),
+  jml_nilai_d              SMALLINT,
+  jml_nilai_e              SMALLINT,
+  skor_toefl               SMALLINT,                        -- NULL bila belum ada
+  sisa_masa_studi          SMALLINT,                        -- dalam semester
+  total_poin_sskm          INTEGER,
   jml_event_wajib_terlewat SMALLINT,
-  status_ukt           VARCHAR(10) CHECK (status_ukt IN ('LUNAS','MENUNGGAK')), -- tanpa nominal (BRL-14)
-  memblokir_pendaftaran BOOLEAN,                            -- BRL-08
+  status_ukt               VARCHAR(10) CHECK (status_ukt IN ('LUNAS','MENUNGGAK')), -- tanpa nominal (BRL-14)
+  memblokir_pendaftaran    BOOLEAN,                        -- BRL-08
   UNIQUE (scan_id, nim)
 );
 
 CREATE TABLE presensi_matkul (
   presensi_id   BIGSERIAL PRIMARY KEY,
-  scan_id       BIGINT NOT NULL REFERENCES scan_run(scan_id)    ON DELETE RESTRICT,
-  nim           VARCHAR(15) NOT NULL REFERENCES mahasiswa(nim)  ON DELETE RESTRICT,
+  scan_id       BIGINT NOT NULL REFERENCES scan_run(scan_id)      ON DELETE RESTRICT,
+  nim           VARCHAR(15) NOT NULL REFERENCES mahasiswa(nim)    ON DELETE RESTRICT,
   kode_mk       VARCHAR(15) NOT NULL REFERENCES mata_kuliah(kode_mk) ON DELETE RESTRICT,
   jml_pertemuan SMALLINT NOT NULL,
   jml_hadir     SMALLINT NOT NULL,
@@ -250,28 +244,6 @@ CREATE TABLE counseling_log (
   tindak_lanjut TEXT
 );
 
--- Tambahan dari Bagian A.2 & A.7 (BRL-11, ketahanan sumber data)
-CREATE TABLE escalation_log (
-  eskalasi_id      BIGSERIAL PRIMARY KEY,
-  risk_id          BIGINT NOT NULL REFERENCES risk_score(risk_id) ON DELETE RESTRICT,
-  tingkat          VARCHAR(15) NOT NULL CHECK (tingkat IN ('DOSEN_WALI','KAPRODI')),
-  penerima_user_id BIGINT REFERENCES users(user_id) ON DELETE RESTRICT,
-  waktu_eskalasi   TIMESTAMP NOT NULL DEFAULT now(),
-  status_respons   VARCHAR(10) NOT NULL DEFAULT 'BELUM' CHECK (status_respons IN ('BELUM','DIRESPONS')),
-  waktu_respons    TIMESTAMP
-);
-
-CREATE TABLE sync_log (
-  sync_id       BIGSERIAL PRIMARY KEY,
-  scan_id       BIGINT NOT NULL REFERENCES scan_run(scan_id) ON DELETE RESTRICT,
-  sumber        VARCHAR(20) NOT NULL CHECK (sumber IN
-                ('SIAKAD','SIM_TA','KEUANGAN','KEMAHASISWAAN','SMART_LAB')),
-  status        VARCHAR(10) NOT NULL CHECK (status IN ('BERHASIL','GAGAL')),
-  jml_record    INTEGER,
-  error_message TEXT,
-  waktu         TIMESTAMP NOT NULL DEFAULT now()
-);
-
 -- ---------------------------------------------------------------------
 -- 5. AUDIT (append-only, BRL-16)
 -- ---------------------------------------------------------------------
@@ -287,10 +259,7 @@ CREATE TABLE audit_log (
   ip_address VARCHAR(45)
 );
 
-CREATE OR REPLACE FUNCTION fn_audit_immutable() RETURNS trigger AS $$
-BEGIN
-  RAISE EXCEPTION 'audit_log bersifat append-only (BRL-16)';
-END; $$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION fn_audit_immutable() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'audit_log bersifat append-only (BRL-16)'; END; $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_audit_no_update_delete
   BEFORE UPDATE OR DELETE ON audit_log
@@ -300,38 +269,14 @@ CREATE TRIGGER trg_audit_no_truncate
   FOR EACH STATEMENT EXECUTE FUNCTION fn_audit_immutable();
 
 -- Trigger audit otomatis untuk perubahan config_rule
-CREATE OR REPLACE FUNCTION fn_audit_generic() RETURNS trigger AS $$
-DECLARE
-  v_user BIGINT := NULLIF(current_setting('app.current_user_id', true), '')::BIGINT;
-  v_rec  TEXT;
-BEGIN
-  IF TG_OP = 'DELETE' THEN
-    v_rec := to_jsonb(OLD) ->> TG_ARGV[0];
-    INSERT INTO audit_log(user_id, aksi, nama_tabel, record_id, data_lama)
-    VALUES (v_user, TG_OP, TG_TABLE_NAME, v_rec, to_jsonb(OLD));
-    RETURN OLD;
-  ELSIF TG_OP = 'UPDATE' THEN
-    v_rec := to_jsonb(NEW) ->> TG_ARGV[0];
-    INSERT INTO audit_log(user_id, aksi, nama_tabel, record_id, data_lama, data_baru)
-    VALUES (v_user, TG_OP, TG_TABLE_NAME, v_rec, to_jsonb(OLD), to_jsonb(NEW));
-    RETURN NEW;
-  ELSE
-    v_rec := to_jsonb(NEW) ->> TG_ARGV[0];
-    INSERT INTO audit_log(user_id, aksi, nama_tabel, record_id, data_baru)
-    VALUES (v_user, TG_OP, TG_TABLE_NAME, v_rec, to_jsonb(NEW));
-    RETURN NEW;
-  END IF;
-END; $$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION fn_audit_generic() RETURNS trigger AS $$ DECLARE v_user BIGINT := NULLIF(current_setting('app.current_user_id', true), '')::BIGINT; v_rec  TEXT; BEGIN IF TG_OP = 'DELETE' THEN v_rec := to_jsonb(OLD) ->> TG_ARGV[0]; INSERT INTO audit_log(user_id, aksi, nama_tabel, record_id, data_lama) VALUES (v_user, TG_OP, TG_TABLE_NAME, v_rec, to_jsonb(OLD)); RETURN OLD; ELSIF TG_OP = 'UPDATE' THEN v_rec := to_jsonb(NEW) ->> TG_ARGV[0]; INSERT INTO audit_log(user_id, aksi, nama_tabel, record_id, data_lama, data_baru) VALUES (v_user, TG_OP, TG_TABLE_NAME, v_rec, to_jsonb(OLD), to_jsonb(NEW)); RETURN NEW; ELSE v_rec := to_jsonb(NEW) ->> TG_ARGV[0]; INSERT INTO audit_log(user_id, aksi, nama_tabel, record_id, data_baru) VALUES (v_user, TG_OP, TG_TABLE_NAME, v_rec, to_jsonb(NEW)); RETURN NEW; END IF; END; $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_audit_config_rule
   AFTER INSERT OR UPDATE OR DELETE ON config_rule
   FOR EACH ROW EXECUTE FUNCTION fn_audit_generic('config_id');
 
 -- Risk score append-only: riwayat tidak boleh ditimpa
-CREATE OR REPLACE FUNCTION fn_risk_append_only() RETURNS trigger AS $$
-BEGIN
-  RAISE EXCEPTION 'risk_score bersifat append-only; tambahkan baris baru melalui scan_run';
-END; $$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION fn_risk_append_only() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'risk_score bersifat append-only; tambahkan baris baru melalui scan_run'; END; $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_risk_append_only
   BEFORE UPDATE OR DELETE ON risk_score
@@ -348,7 +293,6 @@ CREATE INDEX idx_relasi_nim          ON relasi_bimbingan (nim);
 CREATE INDEX idx_bimbingan_ta_tgl    ON bimbingan_log (ta_id, tgl_bimbingan DESC);
 CREATE INDEX idx_snapshot_nim        ON snapshot_mahasiswa (nim, scan_id DESC);
 CREATE INDEX idx_presensi_nim_scan   ON presensi_matkul (nim, scan_id);
-CREATE INDEX idx_eskalasi_belum      ON escalation_log (waktu_eskalasi) WHERE status_respons = 'BELUM';
 CREATE INDEX idx_notif_risk_waktu    ON notifikasi (risk_id, waktu_kirim);
 CREATE INDEX idx_audit_waktu         ON audit_log (waktu);
 CREATE INDEX idx_audit_tabel_record  ON audit_log (nama_tabel, record_id);
@@ -475,10 +419,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ews_app, 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ews_app, ews_etl, ews_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ews_readonly;
 
--- ETL hanya menulis snapshot dan log sinkronisasi
+-- ETL hanya menulis snapshot
 GRANT SELECT ON mahasiswa, dosen, mata_kuliah, semester, scan_run, program_studi TO ews_etl;
 GRANT INSERT, UPDATE ON scan_run TO ews_etl;
-GRANT INSERT ON snapshot_mahasiswa, presensi_matkul, progres_praktikum, sync_log TO ews_etl;
+GRANT INSERT ON snapshot_mahasiswa, presensi_matkul, progres_praktikum TO ews_etl;
 
 -- audit_log: hanya INSERT (BRL-16)
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM PUBLIC, ews_app, ews_etl, ews_readonly, ews_admin;
