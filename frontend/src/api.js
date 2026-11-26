@@ -81,7 +81,7 @@ export const api = {
   },
   me: () => request('/auth/me'),
   getMyRisk: () => request('/students/me/risk'),
-  getAdvisees: () => request('/advisees'),
+  getAdvisees: (params = '') => request(`/advisees${params}`),
   getStudentRisk: (nim) => request(`/students/${encodeURIComponent(nim)}/risk`),
   getStudentMilestones: (nim) => request(`/students/${encodeURIComponent(nim)}/milestones`),
   createCounseling: (nim, payload) =>
@@ -108,8 +108,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   triggerScan: () =>
-    request('/scans', {
-      method: 'POST',
-    }),
-  getAuditLogs: () => request('/audit-logs'),
+    request('/scans', { method: 'POST' }),
+  getAuditLogs: (limit = 50) => request(`/audit-logs?limit=${limit}`),
 };

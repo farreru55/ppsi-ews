@@ -33,12 +33,9 @@ export class AnalyticsService {
 
     const res = await query(sql, params);
 
-    // Ambil bottleneck analytics
-    const bottleneckSql = `
-      SELECT * FROM mv_bottleneck_milestone
-      ${prodiId ? ' WHERE prodi_id = $1 ' : ''}
-    `;
-    const bottleneckRes = await query(bottleneckSql, params);
+    // Ambil bottleneck analytics (mv_bottleneck_milestone tidak punya kolom prodi_id)
+    const bottleneckSql = `SELECT * FROM mv_bottleneck_milestone ORDER BY jml_terlambat DESC LIMIT 20`;
+    const bottleneckRes = await query(bottleneckSql, []);
 
     // Ambil tren kelulusan semester lampau (simulasi agregat tren historis)
     const trends = [

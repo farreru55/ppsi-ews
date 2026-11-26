@@ -397,6 +397,10 @@ export default function App() {
   });
   const [auditLogs, setAuditLogs] = useState(INITIAL_AUDIT_LOGS);
   const [isScanning, setIsScanning] = useState(false);
+  const [ktwStats, setKtwStats] = useState({
+    total: 0, hijau: 0, kuning: 0, merah: 0,
+    hijauPct: 82, kuningPct: 15, merahPct: 3, rasioKtw: 0
+  });
 
   const showToastMessage = (message, type = 'success') => {
     setToast({ message, type });
@@ -461,32 +465,183 @@ export default function App() {
     const loadRoleData = async () => {
       try {
         if (currentUser.role === 'MAHASISWA') {
+          // Fetch full risk detail (pilar, milestone, action plan, akademik)
           const risk = await api.getMyRisk();
           if (risk) {
-            setStudentData((prev) => ({
+            const mhs = risk.mahasiswa || {};
+            const latestRisk = risk.latestRisk || {};
+            const detail = latestRisk.detail_pemicu || {};
+            const academicSummary = risk.academic || {};
+            const milestone = risk.milestone || {};
+            const actionPlansRaw = risk.actionPlans || [];
+
+            // Map pilar dari skor backend
+            const skorTa = parseFloat(latestRisk.skor_ta ?? 0);
+            const skorAkad = parseFloat(latestRisk.skor_akademik ?? 0);
+            const skorNonAkad = parseFloat(latestRisk.skor_nonakademik ?? 0);
+            const skorKeu = parseFloat(latestRisk.skor_keuangan ?? 0);
+
+            const pilar = [
+              {
+                id: 'ta', nama: 'Progres Tugas Akhir', bobot: '40%',
+                skor: Math.round(skorTa),
+                level: skorTa >= 70 ? 'Risiko tinggi' : skorTa >= 40 ? 'Perlu perhatian' : 'Aman',
+                warna: skorTa >= 70 ? '#DC2626' : skorTa >= 40 ? '#F59E0B' : '#10B981',
+                detail: detail.ta?.map(p => p.pesan).join(' | ') || 'Data TA terpantau'
+              },
+              {
+                id: 'akademik', nama: 'Akademik', bobot: '30%',
+                skor: Math.round(skorAkad),
+                level: skorAkad >= 70 ? 'Risiko tinggi' : skorAkad >= 40 ? 'Perlu perhatian' : 'Aman',
+                warna: skorAkad >= 70 ? '#DC2626' : skorAkad >= 40 ? '#F59E0B' : '#10B981',
+                detail: `IPK ${academicSummary.ipk ?? '-'} | TOEFL ${academicSummary.skor_toefl ?? '-'}`
+              },
+              {
+                id: 'sskm', nama: 'SSKM', bobot: '15%',
+                skor: Math.round(skorNonAkad),
+                level: skorNonAkad >= 70 ? 'Risiko tinggi' : skorNonAkad >= 40 ? 'Perlu perhatian' : 'Aman',
+                warna: skorNonAkad >= 70 ? '#DC2626' : skorNonAkad >= 40 ? '#F59E0B' : '#10B981',
+                detail: detail.nonAkademik?.map(p => p.pesan).join(' | ') || 'SSKM terpantau'
+              },
+              {
+                id: 'keuangan', nama: 'Keuangan', bobot: '15%',
+                skor: Math.round(skorKeu),
+                level: skorKeu >= 70 ? 'Risiko tinggi' : skorKeu >= 40 ? 'Perlu perhatian' : 'Aman',
+                warna: skorKeu >= 70 ? '#DC2626' : skorKeu >= 40 ? '#F59E0B' : '#10B981',
+                detail: detail.keuangan?.[0]?.pesan || 'Status UKT/SPP terpantau'
+              }
+            ];
+
+            // Map milestones
+            const tahapOrder = ['PROPOSAL', 'SEMPRO', 'BIMBINGAN', 'SEMHAS', 'SIDANG', 'YUDISIUM'];
+            const tahapLabel = { PROPOSAL: 'Proposal', SEMPRO: 'Sempro', BIMBINGAN: 'Bimbingan', SEMHAS: 'Semhas', SIDANG: 'Sidang', YUDISIUM: 'Yudisium' };
+            const milestonesFromDB = (milestone.milestones || []);
+            const milestones = tahapOrder.map((tahap, idx) => {
+              const m = milestonesFromDB.find(x => x.tahap === tahap);
+              return {
+                id: idx + 1,
+                tahap: tahapLabel[tahap] || tahap,
+                status: m?.status === 'SELESAI' ? 'SELESAI' : m?.status === 'BERJALAN' ? 'AKTIF' : 'MENUNGGU',
+                durasi: m?.tgl_mulai ? `${m.durasi_hari ?? '-'} hari` : '-',
+                keterangan: m?.keterangan || '-'
+              };
+            });
+
+            // Map action plans
+            const actionPlans = actionPlansRaw.map((ap, idx) => ({
+              id: ap.plan_id,
+              judul: ap.deskripsi?.split('.')[0] || `Action Plan ${idx + 1}`,
+              deskripsi: ap.deskripsi,
+              tag: ap.status === 'SELESAI' ? 'Selesai' : ap.tgl_target ? ap.tgl_target : 'Segera',
+              tagType: ap.status === 'SELESAI' ? 'success' : 'warning',
+              selesai: ap.status === 'SELESAI'
+            }));
+
+            setStudentData(prev => ({
               ...prev,
-              nim: risk.nim || prev.nim,
-              nama: risk.nama || currentUser.name || prev.nama,
-              skorTotal: risk.skor_total ?? risk.skorTotal ?? prev.skorTotal,
-              status: risk.status_risiko || risk.status || prev.status,
+              nim: mhs.nim || prev.nim,
+              nama: mhs.nama || prev.nama,
+              prodi: mhs.nama_prodi || prev.prodi,
+              angkatan: mhs.angkatan || prev.angkatan,
+              skorTotal: parseFloat(latestRisk.skor_total ?? prev.skorTotal),
+              status: latestRisk.status || prev.status,
+              terakhirDipindai: latestRisk.tgl_hitung ? new Date(latestRisk.tgl_hitung).toLocaleString('id-ID') : prev.terakhirDipindai,
+              bimbinganTerverifikasi: milestone.jml_bimbingan_terverifikasi ?? prev.bimbinganTerverifikasi,
+              pilar: pilar.length ? pilar : prev.pilar,
+              milestones: milestones.length ? milestones : prev.milestones,
+              actionPlans: actionPlans.length ? actionPlans : prev.actionPlans,
             }));
           }
         } else if (currentUser.role === 'DOSEN') {
-          const adviseesData = await api.getAdvisees();
-          if (Array.isArray(adviseesData) && adviseesData.length > 0) {
-            setAdvisees(
-              adviseesData.map((a) => ({
+          const adviseesRaw = await api.getAdvisees();
+          const list = Array.isArray(adviseesRaw) ? adviseesRaw : [];
+          if (list.length > 0) {
+            setAdvisees(list.map(a => {
+              const detail = a.detail_pemicu || {};
+              const taPemicu = detail.ta || [];
+              const pemicuUtama = taPemicu[0]?.pesan || (a.skor_ta >= 40 ? 'Progres TA berisiko' : 'Terpantau');
+              return {
                 nim: a.nim,
                 nama: a.nama,
-                prodi: a.nama_prodi || 'S1 Sistem Informasi',
-                angkatan: a.angkatan || 2022,
-                semester: a.semester || 8,
-                skor: a.skor_total ?? a.skor ?? 0,
-                status: a.status_risiko || a.status || 'HIJAU',
-                taProgress: a.ta_progress || 'Terpantau',
-                lastContact: a.last_contact || 'Baru saja',
-              }))
-            );
+                initials: a.nama?.split(' ').filter(Boolean).slice(0, 2).map(s => s[0]).join('').toUpperCase() || 'MH',
+                angkatan: a.angkatan,
+                skor: parseFloat(a.skor_total ?? 0),
+                status: a.status_risiko || 'HIJAU',
+                pemicuUtama,
+                presensi: detail.akademik?.find(p => p.kode === 'PRESENSI_RENDAH')?.nilai ?? 90,
+                nilaiE: detail.akademik?.find(p => p.kode === 'NILAI_E')?.pesan ?? 'Tidak ada nilai E',
+                hariTanpaBimbingan: detail.ta?.find(p => p.kode?.includes('BIMBINGAN'))?.nilai ?? 0,
+                statusUkt: detail.keuangan?.[0]?.kode === 'TUNGGAKAN_UKT' ? 'MENUNGGAK' : 'LUNAS',
+                sskm: detail.nonAkademik?.find(p => p.kode === 'SSKM_BELUM_CUKUP')?.poin ?? 100,
+                hariEskalasi: 0,
+              };
+            }));
+          }
+        } else if (currentUser.role === 'KAPRODI') {
+          // Fetch analytics KTW + escalations
+          const [analytics, escalationsRaw] = await Promise.all([
+            api.getKtwAnalytics().catch(() => null),
+            api.getEscalations().catch(() => []),
+          ]);
+
+          if (analytics?.prodiList?.length) {
+            const prodi = analytics.prodiList[0];
+            const total = parseInt(prodi.total_mahasiswa_aktif || 0);
+            const hijau = parseInt(prodi.total_hijau || 0);
+            const kuning = parseInt(prodi.total_kuning || 0);
+            const merah = parseInt(prodi.total_merah || 0);
+            const hijauPct = total ? Math.round(hijau / total * 100) : 82;
+            const kuningPct = total ? Math.round(kuning / total * 100) : 15;
+            const merahPct = total ? Math.round(merah / total * 100) : 3;
+            setKtwStats({ total, hijau, kuning, merah, hijauPct, kuningPct, merahPct, rasioKtw: parseFloat(prodi.rasio_ktw_potensial ?? 0) });
+          }
+
+          const escList = Array.isArray(escalationsRaw) ? escalationsRaw : (escalationsRaw?.data || []);
+          if (escList.length > 0) {
+            setEscalations(escList.map(e => ({
+              id: e.esc_id ?? e.id,
+              nim: e.nim,
+              nama: e.nama || '-',
+              hari: e.hari_eskalasi ?? 0,
+              pemicu: e.pemicu || e.keterangan || '-',
+              keterangan: e.keterangan || '-',
+              ditindaklanjuti: e.status_respons === 'DIRESPONS',
+              catatanKaprodi: e.catatan || '',
+            })));
+          }
+        } else if (currentUser.role === 'ADMIN') {
+          // Fetch config & audit logs
+          const [configRaw, auditRaw] = await Promise.all([
+            api.getConfig().catch(() => []),
+            api.getAuditLogs(50).catch(() => ({ data: [] })),
+          ]);
+
+          if (Array.isArray(configRaw) && configRaw.length > 0) {
+            const findVal = (param) => {
+              const c = configRaw.find(r => r.parameter === param);
+              return c ? parseFloat(c.nilai) : null;
+            };
+            const bobotTa = findVal('BOBOT_TA');
+            const bobotAkad = findVal('BOBOT_AKADEMIK');
+            const bobotSskm = findVal('BOBOT_SSKM');
+            const bobotKeu = findVal('BOBOT_KEUANGAN');
+            const nHari = findVal('N_HARI');
+            const mHari = findVal('M_HARI');
+            if (bobotTa !== null) setWeights({ ta: bobotTa, akademik: bobotAkad ?? 30, sskm: bobotSskm ?? 15, keuangan: bobotKeu ?? 15 });
+            if (nHari !== null) setEscalationParams({ nDays: nHari, mDays: mHari ?? 14 });
+          }
+
+          const auditList = auditRaw?.data || [];
+          if (auditList.length > 0) {
+            setAuditLogs(auditList.map(a => ({
+              id: `AUD-${a.audit_id}`,
+              waktu: new Date(a.waktu).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+              kategori: a.nama_tabel === 'config_rule' ? 'Konfigurasi' : a.aksi?.includes('SCAN') ? 'Pemindaian' : 'Sistem',
+              aktivitas: a.aksi + (a.record_id ? ` #${a.record_id}` : ''),
+              kanal: a.username || 'Sistem',
+              status: 'Tercatat',
+              badgeType: 'success',
+            })));
           }
         }
       } catch (err) {
